@@ -41,3 +41,7 @@ https://easylist-downloads.adblockplus.org/indianlist-minified.txt
 https://easylist-downloads.adblockplus.org/latvianlist-minified.txt
 https://easylist-downloads.adblockplus.org/rolist-minified.txt
 https://easylist-downloads.adblockplus.org/ruadlist-minified.txt
+
+# HaGeZi Blocklists
+https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/pro.mini.txt
+https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/tif.mini.txt
