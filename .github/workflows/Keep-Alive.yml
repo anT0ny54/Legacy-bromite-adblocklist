@@ -1,0 +1,31 @@
+name: Keep Fork Alive
+
+on:
+  schedule:
+    # Runs at 00:00 every 30 days to stay well ahead of the 60-day limit
+    - cron: '0 0 */30 * *'
+  workflow_dispatch: # Allows you to trigger this manually if needed
+
+jobs:
+  keep-alive:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Allows the workflow to push commits back to the repo
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Generate activity dummy commit
+      run: |
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        
+        # Create or update a dummy text file with the latest execution date
+        echo "Last kept alive on: $(date)" > .github/keep-alive.txt
+        
+        git add .github/keep-alive.txt
+        git commit -m "chore: automated keep-alive activity commit"
+        git push
+
+        
