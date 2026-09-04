@@ -122,7 +122,7 @@ sanitize_file() {
     local output="$2"
     local source="$3"
 
-    awk -v source="$source" -v rejected="$REJECTED" '
+    awk -v source="$source" -v rejected="$REJECTED" -v build_dir="$BUILD_DIR" '
     function reject(reason, value) {
         gsub(/\t/, " ", value)
         printf "%s\t%s\t%s\n", source, reason, value >> rejected
@@ -252,7 +252,7 @@ sanitize_file() {
     }
 
     END {
-        printf "%d\n", rejected_count + 0 > "'$BUILD_DIR'/rejected-count.txt"
+        printf "%d\n", rejected_count + 0 > (build_dir "/rejected-count.txt")
     }
     ' "$input" "$output"
 }
