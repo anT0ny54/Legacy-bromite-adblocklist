@@ -254,7 +254,7 @@ sanitize_file() {
     END {
         printf "%d\n", rejected_count + 0 > (build_dir "/rejected-count.txt")
     }
-    ' "$input" "$output"
+    ' "$input" > "$output"
 }
 
 source_number=0
