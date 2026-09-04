@@ -1,0 +1,43 @@
+# Filter List Sources
+# Each line is a URL to a filter list that will be downloaded and merged.
+# Lines starting with # are comments.
+#
+# Maintainer: anT0ny54
+# Purpose: canonical sources used by the merge/download tool in this repo
+# Last-updated: 2026-08-30
+# Note: This file remains a simple URL-per-line format for tools that expect that
+#       format. If you want metadata (enabled/name/category) see `sources.yaml`.
+#
+# Basic Adblock
+https://filters.adtidy.org/extension/ublock/filters/101_optimized.txt
+https://easylist-downloads.adblockplus.org/easylist-minified.txt
+https://filters.adtidy.org/extension/ublock/filters/118_optimized.txt
+https://easylist-downloads.adblockplus.org/easyprivacy-minified.txt
+https://filters.adtidy.org/extension/ublock/filters/122_optimized.txt
+https://filters.adtidy.org/extension/ublock/filters/123_optimized.txt
+https://easylist-downloads.adblockplus.org/fanboy-social-minified.txt
+
+# EasyList China
+https://filters.adtidy.org/extension/ublock/filters/104_optimized.txt
+https://easylist-downloads.adblockplus.org/easylistchina-minified.txt
+
+# Liste FR
+https://filters.adtidy.org/extension/ublock/filters/113_optimized.txt
+https://easylist-downloads.adblockplus.org/liste_fr-minified.txt
+
+# Other EasyList
+https://easylist-downloads.adblockplus.org/abpindo-minified.txt
+https://easylist-downloads.adblockplus.org/abpvn-minified.txt
+https://easylist-downloads.adblockplus.org/bulgarian_list-minified.txt
+https://easylist-downloads.adblockplus.org/easylistdutch-minified.txt
+https://easylist-downloads.adblockplus.org/easylistgermany-minified.txt
+https://easylist-downloads.adblockplus.org/israellist-minified.txt
+https://easylist-downloads.adblockplus.org/easylistitaly-minified.txt
+https://easylist-downloads.adblockplus.org/easylistlithuania-minified.txt
+https://easylist-downloads.adblockplus.org/easylistpolish-minified.txt
+https://easylist-downloads.adblockplus.org/easylistportuguese-minified.txt
+https://easylist-downloads.adblockplus.org/easylistspanish-minified.txt
+https://easylist-downloads.adblockplus.org/indianlist-minified.txt
+https://easylist-downloads.adblockplus.org/latvianlist-minified.txt
+https://easylist-downloads.adblockplus.org/rolist-minified.txt
+https://easylist-downloads.adblockplus.org/ruadlist-minified.txt
