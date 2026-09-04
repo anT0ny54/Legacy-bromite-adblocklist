@@ -7,7 +7,7 @@ Comprehensive blocklist for ads, privacy & annoyance filter list — auto-compil
 Add this **one URL** to your browser:
 
 ```
-https://raw.githubusercontent.com/anT0ny54/filter-lists/refs/heads/main/filters.txt
+https://raw.githubusercontent.com/anT0ny54/Legacy-bromite-adblocklist/refs/heads/main/filters.txt
 ```
 
 ### uBlock Origin, ABP and etc
