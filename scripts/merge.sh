@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 IFS=$'\n\t'
+LC_ALL=C
+export LC_ALL
 
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -15,7 +17,6 @@ CLEAN_DIR="$BUILD_DIR/clean"
 MAX_SOURCE_BYTES="${MAX_SOURCE_BYTES:-52428800}"
 MAX_OUTPUT_BYTES="${MAX_OUTPUT_BYTES:-20971520}"
 CURL_TIMEOUT="${CURL_TIMEOUT:-120}"
-
 USER_AGENT="${USER_AGENT:-legacy-bromite-filter-builder/2.0}"
 
 die() {
@@ -28,7 +29,17 @@ need() {
         die "missing required command: $1"
 }
 
-for command in curl awk sed sort grep head tr wc mktemp cat; do
+for command in \
+    awk \
+    cat \
+    curl \
+    grep \
+    head \
+    mktemp \
+    sed \
+    sort \
+    tr \
+    wc; do
     need "$command"
 done
 
@@ -52,7 +63,7 @@ printf '# source\treason\trule\n' > "$REJECTED"
 tmp_output="$(mktemp "${OUTPUT_FILE}.tmp.XXXXXX")"
 
 cleanup() {
-    rm -f "$tmp_output"
+    rm -f -- "$tmp_output"
 }
 
 trap cleanup EXIT
@@ -61,6 +72,7 @@ download_source() {
     local id="$1"
     local url="$2"
     local output="$RAW_DIR/$id.txt"
+    local actual_size
 
     printf 'Downloading: %s\n' "$url"
 
@@ -80,26 +92,41 @@ download_source() {
         --output "$output"; then
 
         printf 'DOWNLOAD_FAILED\t%s\n' "$url" >> "$DOWNLOAD_ERRORS"
-        rm -f "$output"
+        rm -f -- "$output"
+        return 1
+    fi
+
+    [[ -f "$output" ]] || {
+        printf 'NO_OUTPUT\t%s\n' "$url" >> "$DOWNLOAD_ERRORS"
+        return 1
+    }
+
+    actual_size="$(wc -c < "$output" | tr -d ' ')"
+
+    if (( actual_size > MAX_SOURCE_BYTES )); then
+        printf 'TOO_LARGE\t%s\t%s bytes\n' \
+            "$url" "$actual_size" >> "$DOWNLOAD_ERRORS"
+        rm -f -- "$output"
         return 1
     fi
 
     if [[ ! -s "$output" ]]; then
         printf 'EMPTY\t%s\n' "$url" >> "$DOWNLOAD_ERRORS"
-        rm -f "$output"
+        rm -f -- "$output"
         return 1
     fi
 
     # Reject common HTML error pages.
     if head -c 4096 "$output" |
         tr '[:upper:]' '[:lower:]' |
-        grep -Eq '<html|<!doctype|access denied|error 404|rate limit exceeded'; then
+        grep -Eq '<html|<!doctype html'; then
 
-        printf 'HTML_OR_ERROR\t%s\n' "$url" >> "$DOWNLOAD_ERRORS"
-        rm -f "$output"
+        printf 'HTML_ERROR_PAGE\t%s\n' "$url" >> "$DOWNLOAD_ERRORS"
+        rm -f -- "$output"
         return 1
     fi
 
+    printf '%s\n' "$url" > "$RAW_DIR/$id.url"
     return 0
 }
 
@@ -117,7 +144,7 @@ sanitize_file() {
     }
 
     function valid_domain(value,    count, parts, i, part) {
-        # Lowercase ASCII hostnames only.
+        # ASCII DNS hostnames only.
         if (value !~ /^[A-Za-z0-9.-]+$/)
             return 0
 
@@ -127,7 +154,14 @@ sanitize_file() {
         if (value ~ /\.\./)
             return 0
 
+        # Require a dotted hostname.
         count = split(value, parts, ".")
+        if (count < 2)
+            return 0
+
+        # Reject IPv4 addresses as domains.
+        if (value ~ /^[0-9.]+$/)
+            return 0
 
         for (i = 1; i <= count; i++) {
             part = parts[i]
@@ -146,22 +180,16 @@ sanitize_file() {
     }
 
     function valid_domain_anchor(value, normalized, domain) {
-        # Accept only a validated domain anchor:
-        # ||example.com^
-        # ||example.com/path
-        # ||example.com*
-        # @@||example.com^
-
         normalized = value
 
-        # Remove the exception prefix.
+        # Remove exception prefix.
         sub(/^\@\@/, "", normalized)
 
         # Must start with ||.
         if (normalized !~ /^\|\|/)
             return 0
 
-        # Extract the hostname before ^, /, or *.
+        # Extract hostname before ^, /, or *.
         domain = normalized
         sub(/^\|\|/, "", domain)
         sub(/[\/\^\*].*$/, "", domain)
@@ -169,7 +197,10 @@ sanitize_file() {
         if (!valid_domain(domain))
             return 0
 
-        # Require a valid network-filter suffix.
+        # Accept:
+        # ||example.com^
+        # ||example.com/path
+        # ||example.com*
         return normalized ~ /^\|\|[A-Za-z0-9.-]+(\^|\/|\*)/
     }
 
@@ -181,26 +212,6 @@ sanitize_file() {
         # @@https://example.com/ad.js
         return value ~ /^(\@\@)?\|https?:\/\/[^|[:space:]]+$/ ||
                value ~ /^(\@\@)?https?:\/\/[^[:space:]]+$/
-    }
-
-    function valid_path_rule(value) {
-        # Accept simple path filters such as:
-        # /ads/banner
-        # /advertising/
-        #
-        # A rule beginning and ending with "/" is rejected separately
-        # because that represents a regular-expression filter.
-        return value ~ /^(\@\@)?\/[A-Za-z0-9._~:/?&=%+\-]+$/
-    }
-
-    function valid_plain_rule(value) {
-        # Plain substring filters are intentionally restricted.
-        # Operators are not allowed here because malformed ABP syntax
-        # could otherwise pass through accidentally.
-        return value ~ /^[A-Za-z0-9._~:/?&=%+\-]+$/ &&
-               value ~ /[A-Za-z0-9]/ &&
-               value !~ /^\.+$/ &&
-               value !~ /^-+$/
     }
 
     {
@@ -216,16 +227,17 @@ sanitize_file() {
         if (line == "")
             next
 
-        # Standard ABP comments and metadata.
+        # Adblock comments.
         if (line ~ /^!/)
             next
 
+        # Metadata is not a network rule.
         if (line ~ /^\[Adblock/) {
             reject("metadata", original)
             next
         }
 
-        # Reject all cosmetic, HTML, scriptlet, and procedural syntax.
+        # Remove cosmetic and procedural filters.
         if (line ~ /##|#@#|#\?#|#\$#|#%#|#\^#|#@%\?#/) {
             reject("cosmetic-or-procedural-filter", original)
             next
@@ -236,26 +248,25 @@ sanitize_file() {
             next
         }
 
-        # Reject all filter options for lowest-risk legacy compatibility.
+        # Remove filter options.
         if (line ~ /\$/) {
             reject("filter-options-not-allowed", original)
             next
         }
 
-        # Reject regular-expression filters.
+        # Remove regular-expression filters.
         if (line ~ /^\/.*\/$/) {
             reject("regular-expression-filter", original)
             next
         }
 
-        # Reject control characters.
+        # Remove control characters.
         if (line ~ /[\001-\010\013\014\016-\037\177]/) {
             reject("control-character", original)
             next
         }
 
-        # Reject non-ASCII input.
-        # This is intentionally strict for predictable legacy parsing.
+        # ASCII-only rules.
         if (line ~ /[^\041-\176\t ]/) {
             reject("non-ascii-character", original)
             next
@@ -265,8 +276,6 @@ sanitize_file() {
         # 0.0.0.0 example.com
         # 127.0.0.1 example.com
         # ::1 example.com
-        #
-        # Optional comments after the hostname are accepted.
         if (line ~ /^[ \t]*(0\.0\.0\.0|127\.0\.0\.1|::1)[ \t]+/) {
             count = split(line, fields, /[ \t]+/)
 
@@ -283,29 +292,28 @@ sanitize_file() {
             next
         }
 
-        # No whitespace is allowed in network rules.
+        # No whitespace is allowed in filter rules.
         if (line ~ /[ \t]/) {
             reject("whitespace-not-allowed", original)
             next
         }
 
-        # Reject unsupported or dangerous schemes.
+        # Reject unsupported and dangerous schemes.
         if (line ~ /^(file|data|javascript|about|chrome|chrome-extension):/) {
             reject("unsupported-scheme", original)
             next
         }
 
-        # Reject angle brackets and backslashes.
+        # Reject unsafe characters.
         if (line ~ /[<>\\]/) {
             reject("unsafe-character", original)
             next
         }
 
-        # Exception rules must use a recognized strict form.
+        # Keep only strict exception rules.
         if (line ~ /^\@\@/) {
             if (valid_domain_anchor(line) ||
-                valid_http_rule(line) ||
-                valid_path_rule(line)) {
+                valid_http_rule(line)) {
                 print line
             } else {
                 reject("invalid-exception-rule", original)
@@ -314,31 +322,20 @@ sanitize_file() {
             next
         }
 
-        # Domain-anchored network rules.
+        # Keep domain-anchored network rules.
         if (valid_domain_anchor(line)) {
             print line
             next
         }
 
-        # HTTP and HTTPS rules.
+        # Keep complete HTTP(S) network rules.
         if (valid_http_rule(line)) {
             print line
             next
         }
 
-        # Simple path rules.
-        if (valid_path_rule(line)) {
-            print line
-            next
-        }
-
-        # Strict plain substring rules.
-        if (valid_plain_rule(line)) {
-            print line
-            next
-        }
-
-        reject("unknown-or-unsafe-syntax", original)
+        # Plain substring and path-only rules are intentionally removed.
+        reject("unsupported-network-rule", original)
     }
     ' "$input" > "$output"
 }
@@ -350,11 +347,11 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     line="${line//$'\r'/}"
     line="${line#$'\xef\xbb\xbf'}"
 
-    # Trim leading and trailing whitespace.
-    line="$(printf '%s' "$line" |
-        sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+    line="$(
+        printf '%s' "$line" |
+            sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+    )"
 
-    # Ignore empty lines and comments.
     [[ -z "$line" ]] && continue
     [[ "$line" == \#* ]] && continue
 
@@ -367,7 +364,6 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     source_number=$((source_number + 1))
 
     if download_source "$source_number" "$line"; then
-        printf '%s\n' "$line" > "$RAW_DIR/$source_number.url"
         successful_downloads=$((successful_downloads + 1))
     fi
 done < "$SOURCE_FILE"
@@ -402,19 +398,21 @@ for file in "$CLEAN_DIR"/*.txt; do
     cat "$file" >> "$COMBINED"
 done
 
-# Remove blank lines, normalize CRLF, sort, and deduplicate.
+# Normalize line endings, remove blanks, sort, and deduplicate.
 sed 's/\r$//' "$COMBINED" |
     sed '/^[[:space:]]*$/d' |
-    LC_ALL=C sort -u > "$SORTED"
+    sort -u > "$SORTED"
 
 rule_count="$(wc -l < "$SORTED" | tr -d ' ')"
 
 (( rule_count > 0 )) ||
-    die "zero compatible legacy Bromite rules produced"
+    die "zero compatible Bromite rules produced"
 
+# Write the final text filter list atomically.
 {
-    printf '! Legacy Bromite network filters\n'
+    printf '! Bromite-compatible network filters\n'
     printf '! Cosmetic, scriptlet, procedural, regex, and option rules removed\n'
+    printf '! Plain substring and path-only rules removed\n'
     printf '! Generated by filter-lists\n'
     cat "$SORTED"
 } > "$tmp_output"
@@ -425,7 +423,7 @@ output_bytes="$(wc -c < "$tmp_output" | tr -d ' ')"
     die "filters.txt is ${output_bytes} bytes; maximum allowed is ${MAX_OUTPUT_BYTES} bytes"
 }
 
-mv -f "$tmp_output" "$OUTPUT_FILE"
+mv -f -- "$tmp_output" "$OUTPUT_FILE"
 
 rejected_count="$(
     awk 'NR > 1 { count++ } END { print count + 0 }' "$REJECTED"
