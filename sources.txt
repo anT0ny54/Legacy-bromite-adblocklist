@@ -34,15 +34,23 @@ https://filters.adtidy.org/extension/ublock/filters/104_optimized.txt
 https://easylist-downloads.adblockplus.org/easylistchina-minified.txt
 
 # Liste FR
+https://filters.adtidy.org/extension/ublock/filters/16_optimized.txt
 https://filters.adtidy.org/extension/ublock/filters/113_optimized.txt
 https://easylist-downloads.adblockplus.org/liste_fr-minified.txt
+
+# Germany
+https://filters.adtidy.org/extension/ublock/filters/6_optimized.txt
+https://easylist-downloads.adblockplus.org/easylistgermany-minified.txt
+
+# Russian
+https://filters.adtidy.org/extension/ublock/filters/1_optimized.txt
+https://easylist-downloads.adblockplus.org/ruadlist-minified.txt
 
 # Other EasyList
 https://easylist-downloads.adblockplus.org/abpindo-minified.txt
 https://easylist-downloads.adblockplus.org/abpvn-minified.txt
 https://easylist-downloads.adblockplus.org/bulgarian_list-minified.txt
 https://easylist-downloads.adblockplus.org/easylistdutch-minified.txt
-https://easylist-downloads.adblockplus.org/easylistgermany-minified.txt
 https://easylist-downloads.adblockplus.org/israellist-minified.txt
 https://easylist-downloads.adblockplus.org/easylistitaly-minified.txt
 https://easylist-downloads.adblockplus.org/easylistlithuania-minified.txt
@@ -52,4 +60,3 @@ https://easylist-downloads.adblockplus.org/easylistspanish-minified.txt
 https://easylist-downloads.adblockplus.org/indianlist-minified.txt
 https://easylist-downloads.adblockplus.org/latvianlist-minified.txt
 https://easylist-downloads.adblockplus.org/rolist-minified.txt
-https://easylist-downloads.adblockplus.org/ruadlist-minified.txt
