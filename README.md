@@ -7,7 +7,7 @@ A comprehensive, auto-aggregated blocklist designed to eliminate ads, protect pr
 Add the following URL to your browser or ad-blocker:
 
 ```
-https://raw.githubusercontent.com/anT0ny54/Legacy-bromite-adblocklist/refs/heads/main/filters.txt
+https://raw.githubusercontent.com/anT0ny54/Legacy-bromite-adblocklist/main/filters.txt
 ```
 
 ### uBlock Origin, ABP, and others
