@@ -12,6 +12,7 @@ on:
       - "sources.txt"
       - "custom-rules.txt"
       - "scripts/merge.sh"
+      - "tests/**"
 
 # Prevent overlapping runs from committing conflicting changes.
 concurrency:
@@ -50,6 +51,7 @@ jobs:
 
           test -f filters.txt
           test -s filters.txt
+          bash tests/validate-filters.sh filters.txt
 
       - name: Commit and push changes
         shell: bash
