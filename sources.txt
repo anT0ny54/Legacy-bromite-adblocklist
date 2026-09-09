@@ -77,3 +77,8 @@ https://easylist-downloads.adblockplus.org/easylistpolish-minified.txt
 https://easylist-downloads.adblockplus.org/indianlist-minified.txt
 https://easylist-downloads.adblockplus.org/latvianlist-minified.txt
 https://easylist-downloads.adblockplus.org/rolist-minified.txt
+
+# Ublock origin
+https://cdn.jsdelivr.net/gh/uBlockOrigin/uAssetsCDN@main/filters/filters.min.txt
+https://cdn.jsdelivr.net/gh/uBlockOrigin/uAssetsCDN@main/filters/privacy.min.txt
+https://cdn.jsdelivr.net/gh/uBlockOrigin/uAssetsCDN@main/filters/annoyances.min.txt
