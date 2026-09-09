@@ -21,16 +21,15 @@ CLEAN_DIR="$BUILD_DIR/clean"
 
 MAX_SOURCE_BYTES="${MAX_SOURCE_BYTES:-52428800}"
 MAX_OUTPUT_BYTES="${MAX_OUTPUT_BYTES:-20971520}"
+MAX_TOTAL_SOURCE_BYTES="${MAX_TOTAL_SOURCE_BYTES:-524288000}"
+MAX_SOURCES="${MAX_SOURCES:-100}"
 
 CURL_TIMEOUT="${CURL_TIMEOUT:-120}"
 CURL_CONNECT_TIMEOUT="${CURL_CONNECT_TIMEOUT:-20}"
 CURL_RETRIES="${CURL_RETRIES:-4}"
 CURL_RETRY_DELAY="${CURL_RETRY_DELAY:-3}"
 
-USER_AGENT="${USER_AGENT:-cromite-legacy-filter-builder/3.0}"
-
-# Failed sources are reported but do not fail the build.
-# Set REQUIRE_ALL_SOURCES=1 to restore strict behavior.
+USER_AGENT="${USER_AGENT:-strict-abp-adguard-filter-extractor/1.0}"
 REQUIRE_ALL_SOURCES="${REQUIRE_ALL_SOURCES:-0}"
 
 die() {
@@ -87,6 +86,8 @@ cleanup() {
 
 trap cleanup EXIT
 
+total_downloaded_bytes=0
+
 download_source() {
     local id="$1"
     local url="$2"
@@ -115,10 +116,11 @@ download_source() {
         return 1
     fi
 
-    if [[ ! -f "$output" ]]; then
-        printf 'NO_OUTPUT\t%s\n' "$url" >> "$DOWNLOAD_ERRORS"
-        return 1
-    fi
+    [[ -f "$output" ]] ||
+        {
+            printf 'NO_OUTPUT\t%s\n' "$url" >> "$DOWNLOAD_ERRORS"
+            return 1
+        }
 
     actual_size="$(
         wc -c < "$output" |
@@ -133,6 +135,17 @@ download_source() {
         rm -f -- "$output"
         return 1
     fi
+
+    if (( total_downloaded_bytes + actual_size > MAX_TOTAL_SOURCE_BYTES )); then
+        printf 'TOTAL_SIZE_LIMIT\t%s\t%s bytes\n' \
+            "$url" \
+            "$actual_size" >> "$DOWNLOAD_ERRORS"
+
+        rm -f -- "$output"
+        return 1
+    fi
+
+    total_downloaded_bytes=$((total_downloaded_bytes + actual_size))
 
     if [[ ! -s "$output" ]]; then
         printf 'EMPTY\t%s\n' "$url" >> "$DOWNLOAD_ERRORS"
@@ -169,20 +182,19 @@ sanitize_file() {
     }
 
     function valid_domain(value, count, parts, i, part) {
-        # ASCII DNS hostnames only.
         if (value !~ /^[A-Za-z0-9.-]+$/)
             return 0
 
-        # No leading dot.
         if (value ~ /^\./)
             return 0
 
-        # No trailing dot.
         if (value ~ /\.$/)
             return 0
 
-        # No consecutive dots.
         if (value ~ /\.\./)
+            return 0
+
+        if (length(value) > 253)
             return 0
 
         # Require a dotted hostname.
@@ -194,25 +206,18 @@ sanitize_file() {
         if (value ~ /^[0-9.]+$/)
             return 0
 
-        # Reject excessively long DNS names.
-        if (length(value) > 253)
-            return 0
-
         for (i = 1; i <= count; i++) {
             part = parts[i]
 
             if (part == "")
                 return 0
 
-            # DNS labels cannot start or end with a hyphen.
             if (part ~ /^-/ || part ~ /-$/)
                 return 0
 
-            # ASCII DNS label characters only.
             if (part !~ /^[A-Za-z0-9-]+$/)
                 return 0
 
-            # Maximum DNS label length.
             if (length(part) > 63)
                 return 0
         }
@@ -224,24 +229,17 @@ sanitize_file() {
         exception = 0
         body = value
 
-        # Remove exception prefix for validation.
         if (body ~ /^@@/) {
             exception = 1
             sub(/^@@/, "", body)
         }
 
-        # Strict legacy grammar:
+        # Accepted grammar:
         #
         #   ||example.com^
         #   @@||example.com^
         #
-        # Deliberately reject:
-        #   ||example.com
-        #   ||example.com/path
-        #   ||example.com*
-        #   ||example.com^$option
-        #   |https://example.com/path
-        #   https://example.com/path
+        # Everything else is rejected.
         if (body !~ /^\|\|[A-Za-z0-9.-]+\^$/)
             return 0
 
@@ -277,17 +275,17 @@ sanitize_file() {
         if (line == "")
             next
 
-        # Adblock comments.
+        # ABP, AdGuard, EasyList, EasyPrivacy, and uBlock comments.
         if (line ~ /^!/)
             next
 
-        # Metadata.
+        # AdGuard metadata.
         if (line ~ /^\[Adblock/) {
             reject("metadata", original)
             next
         }
 
-        # CSS and cosmetic filters are unsupported by the legacy engine.
+        # Cosmetic and CSS filters.
         if (line ~ /##|#@#|#\?#|#\$#|#%#|#\^#|#@%\?#/) {
             reject("cosmetic-or-css-filter", original)
             next
@@ -299,7 +297,7 @@ sanitize_file() {
             next
         }
 
-        # Filter options are intentionally not allowed.
+        # All ABP, AdGuard, and uBlock modifiers are rejected.
         if (line ~ /\$/) {
             reject("filter-options-not-supported", original)
             next
@@ -317,7 +315,7 @@ sanitize_file() {
             next
         }
 
-        # Non-ASCII rules are excluded for deterministic legacy conversion.
+        # Keep output deterministic and ASCII-only.
         if (line ~ /[^\041-\176\t ]/) {
             reject("non-ascii-character", original)
             next
@@ -329,9 +327,7 @@ sanitize_file() {
         #   127.0.0.1 example.com
         #   ::1 example.com
         #
-        # Optional comments are allowed:
-        #
-        #   0.0.0.0 example.com # comment
+        # Optional comments are allowed after the hostname.
         if (line ~ /^(0\.0\.0\.0|127\.0\.0\.1|::1)[ \t]+/) {
             count = split(line, fields, /[ \t]+/)
 
@@ -348,25 +344,25 @@ sanitize_file() {
             next
         }
 
-        # No whitespace is allowed in a network rule.
+        # No whitespace is allowed in network rules.
         if (line ~ /[ \t]/) {
             reject("whitespace-not-allowed", original)
             next
         }
 
-        # Reject unsupported or dangerous schemes.
+        # Reject unsafe or unsupported schemes.
         if (line ~ /^(file|data|javascript|about|chrome|chrome-extension):/) {
             reject("unsupported-scheme", original)
             next
         }
 
-        # Reject unsafe characters.
+        # Reject characters that should never occur in this strict format.
         if (line ~ /[<>\\]/) {
             reject("unsafe-character", original)
             next
         }
 
-        # Keep only strict blocking and exception rules.
+        # Exception rule.
         if (line ~ /^@@/) {
             if (!print_strict_rule(line))
                 reject("invalid-exception-rule", original)
@@ -374,10 +370,11 @@ sanitize_file() {
             next
         }
 
+        # Normal blocking rule.
         if (print_strict_rule(line))
             next
 
-        reject("unsupported-legacy-network-rule", original)
+        reject("unsupported-abp-adguard-network-rule", original)
     }
     ' "$input" > "$output"
 }
@@ -399,15 +396,20 @@ while IFS= read -r line || [[ -n "$line" ]]; do
 
     [[ -z "$line" ]] && continue
 
-    # Source-file comments.
+    # Comments in sources.txt.
     [[ "$line" == \#* ]] && continue
 
-    if [[ ! "$line" =~ ^https?://[^[:space:]]+$ ]]; then
+    # HTTPS-only source URLs.
+    if [[ ! "$line" =~ ^https://[^[:space:]]+$ ]]; then
         printf '%s\tinvalid-source-url\t%s\n' \
             "sources.txt" \
             "$line" >> "$REJECTED"
 
         continue
+    fi
+
+    if (( configured_sources >= MAX_SOURCES )); then
+        die "maximum source count exceeded: $MAX_SOURCES"
     fi
 
     configured_sources=$((configured_sources + 1))
@@ -419,25 +421,24 @@ while IFS= read -r line || [[ -n "$line" ]]; do
 done < "$SOURCE_FILE"
 
 (( configured_sources > 0 )) ||
-    die "no source URLs found in: $SOURCE_FILE"
+    die "no HTTPS source URLs found in: $SOURCE_FILE"
 
 download_error_count="$(
     wc -l < "$DOWNLOAD_ERRORS" |
         tr -d '[:space:]'
 )"
 
-# Optional strict mode.
 if (( REQUIRE_ALL_SOURCES )) && (( download_error_count > 0 )); then
     die "one or more sources failed; see: $DOWNLOAD_ERRORS"
 fi
 
-# Normal mode: report failed sources but continue building.
 if (( download_error_count > 0 )); then
-    printf 'WARNING: %s source(s) could not be downloaded; continuing with available sources\n' \
+    printf \
+        'WARNING: %s source(s) failed; continuing with available sources\n' \
         "$download_error_count" >&2
 fi
 
-# Sanitize every downloaded source.
+# Sanitize downloaded sources.
 for input in "$RAW_DIR"/*.txt; do
     [[ -f "$input" ]] || continue
 
@@ -460,14 +461,13 @@ if [[ -s "$CUSTOM_FILE" ]]; then
         "custom-rules.txt"
 fi
 
-# Combine sanitized rules.
+# Combine all accepted rules.
 for file in "$CLEAN_DIR"/*.txt; do
     [[ -f "$file" ]] || continue
-
     cat -- "$file" >> "$COMBINED"
 done
 
-# Normalize line endings, remove blank lines, sort, and deduplicate.
+# Normalize, remove blank lines, sort, and deduplicate.
 sed 's/\r$//' "$COMBINED" |
     sed '/^[[:space:]]*$/d' |
     sort -u > "$SORTED"
@@ -477,11 +477,10 @@ rule_count="$(
         tr -d '[:space:]'
 )"
 
-# Fail only when there is no usable output at all.
 (( rule_count > 0 )) ||
-    die "zero strict legacy Bromite rules produced"
+    die "zero strict ABP/AdGuard rules produced"
 
-# Record rule counts by source.
+# Record accepted-rule counts by source.
 for clean_file in "$CLEAN_DIR"/*.txt; do
     [[ -f "$clean_file" ]] || continue
 
@@ -504,14 +503,14 @@ for clean_file in "$CLEAN_DIR"/*.txt; do
         "$source_rule_count" >> "$SOURCE_COUNTS"
 done
 
-# Write the final output atomically.
 {
-    printf '! Strict legacy Bromite/Cromite network filters\n'
-    printf '! Intended as input to Filtrite before conversion\n'
+    printf '! Strict ABP/AdGuard network-rule subset\n'
+    printf '! Compatible input sources: ABP, AdGuard, EasyList, EasyPrivacy, uBlock Origin\n'
     printf '! Accepted rules: ||domain^ and @@||domain^\n'
-    printf '! CSS, cosmetic, scriptlet, procedural, regex, URL, path, wildcard, and option rules removed\n'
-    printf '! Hosts-file entries converted to ||domain^ rules\n'
-    printf '! Generated by strict-legacy-filter-builder\n'
+    printf '! Hosts entries converted to ||domain^\n'
+    printf '! Modifiers, URL paths, wildcards, regex, cosmetic, scriptlet, and procedural rules removed\n'
+    printf '! This is a strict extraction, not a complete syntax conversion\n'
+    printf '! Generated by strict-abp-adguard-filter-extractor\n'
     cat -- "$SORTED"
 } > "$tmp_output"
 
@@ -520,9 +519,9 @@ output_bytes="$(
         tr -d '[:space:]'
 )"
 
-(( output_bytes <= MAX_OUTPUT_BYTES )) || {
-    die "filters.txt is ${output_bytes} bytes; maximum allowed is ${MAX_OUTPUT_BYTES} bytes"
-}
+if (( output_bytes > MAX_OUTPUT_BYTES )); then
+    die "output is ${output_bytes} bytes; maximum is ${MAX_OUTPUT_BYTES} bytes"
+fi
 
 mv -f -- "$tmp_output" "$OUTPUT_FILE"
 
@@ -541,11 +540,12 @@ rejected_count="$(
 printf '\n'
 printf 'Build completed successfully\n'
 printf 'Output:                 %s\n' "$OUTPUT_FILE"
-printf 'Strict legacy rules:    %s\n' "$rule_count"
+printf 'Strict rules:           %s\n' "$rule_count"
 printf 'Output size:            %s bytes\n' "$output_bytes"
 printf 'Configured sources:     %s\n' "$configured_sources"
 printf 'Successful downloads:   %s\n' "$successful_downloads"
 printf 'Failed sources:         %s\n' "$download_error_count"
+printf 'Downloaded bytes:       %s\n' "$total_downloaded_bytes"
 printf 'Rejected rules:         %s\n' "$rejected_count"
 printf 'Rejected report:        %s\n' "$REJECTED"
 printf 'Download report:        %s\n' "$DOWNLOAD_ERRORS"
