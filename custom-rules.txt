@@ -1,0 +1,6 @@
+! Optional custom rules.
+! Keep only network rules supported by the legacy Bromite/Cromium subresource filter.
+! Examples:
+! ||example.com^
+! ||example.com/ads/*
+! @@||example.com/allowed^
